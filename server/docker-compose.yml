@@ -9,10 +9,22 @@ services:
     volumes:
       - ./data:/app/data
       - ./src:/app/src
+      - ./logs:/app/logs
     environment:
       - PORT=3000
       - NODE_ENV=production
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - mototalk-network
 

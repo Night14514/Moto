@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:audio_manager/audio_manager.dart';
 import 'package:just_audio/just_audio.dart';
 import '../config.dart';
@@ -57,18 +58,19 @@ class AudioService extends ChangeNotifier {
 
   Future<bool> startRecording() async {
     try {
-      // Request audio focus
+      // Request audio focus for communication
+      await _audioManager.setMode(AudioMode.communication);
       await _audioManager.requestAudioFocus();
+      
+      // Enable Bluetooth SCO for headset
+      await _audioManager.setBluetoothScoOn(true);
       
       // Pause music if playing
       if (_audioPlayer.playing) {
         _isMusicPaused = true;
-        _currentMusicSource = _audioPlayer.audioSource.toString();
         await _audioPlayer.pause();
       }
       
-      // Start recording
-      await _audioManager.startRecording();
       _isRecording = true;
       notifyListeners();
       
@@ -81,7 +83,6 @@ class AudioService extends ChangeNotifier {
 
   Future<bool> stopRecording() async {
     try {
-      await _audioManager.stopRecording();
       _isRecording = false;
       
       // Resume music if it was paused
@@ -103,7 +104,9 @@ class AudioService extends ChangeNotifier {
 
   Future<bool> startPlaying() async {
     try {
+      await _audioManager.setMode(AudioMode.communication);
       await _audioManager.requestAudioFocus();
+      await _audioManager.setBluetoothScoOn(true);
       _isPlaying = true;
       notifyListeners();
       return true;
@@ -192,8 +195,8 @@ class AudioService extends ChangeNotifier {
   // Audio processing configuration
   Future<void> configureAudioProcessing() async {
     // WebRTC handles most audio processing internally
-    // This is a placeholder for custom audio processing if needed
     // Noise suppression, echo cancellation, AGC are built into WebRTC
+    // Additional configuration can be added here if needed
   }
 
   @override

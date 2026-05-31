@@ -57,6 +57,14 @@
 	<array>
 		<string>audio</string>
 		<string>voip</string>
+		<string>fetch</string>
+		<string>remote-notification</string>
 	</array>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>armv7</string>
+	</array>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<false/>
 </dict>
 </plist>

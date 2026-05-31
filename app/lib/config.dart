@@ -7,7 +7,14 @@ class Config {
     'iceServers': [
       {'urls': 'stun:stun.l.google.com:19302'},
       {'urls': 'stun:stun1.l.google.com:19302'},
+      {'urls': 'stun:stun2.l.google.com:19302'},
+      {
+        'urls': 'turn:turn.mototalk.local:3478',
+        'username': 'mototalk',
+        'credential': 'mototalk123',
+      },
     ],
+    'iceTransportPolicy': 'all',
     'sdpSemantics': 'unified-plan',
   };
   

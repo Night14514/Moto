@@ -5,6 +5,17 @@ const cors = require('cors');
 const Database = require('better-sqlite3');
 const path = require('path');
 
+// Настройка логирования
+const log = (level, message, data = null) => {
+  const timestamp = new Date().toISOString();
+  const logEntry = `[${timestamp}] [${level.toUpperCase()}] ${message}`;
+  if (data) {
+    console.log(logEntry, JSON.stringify(data, null, 2));
+  } else {
+    console.log(logEntry);
+  }
+};
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -109,7 +120,7 @@ app.get('/api/peer/:userId', (req, res) => {
 
 // Обработка соединений Socket.io
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
+  log('info', 'Client connected', { socketId: socket.id });
   
   let currentUserId = null;
   
@@ -148,27 +159,34 @@ io.on('connection', (socket) => {
       }
     }
     
-    console.log('User authenticated:', user.username, 'ID:', userId);
+    log('info', 'User authenticated', { username: user.username, userId });
   });
   
   // Сигнализация WebRTC
   socket.on('offer', ({ targetUserId, offer }) => {
     const targetSocketId = activeUsers.get(targetUserId);
     if (targetSocketId) {
+      log('debug', 'Forwarding offer', { from: currentUserId, to: targetUserId });
       io.to(targetSocketId).emit('offer', { offer, fromUserId: currentUserId });
+    } else {
+      log('warn', 'Target user not found for offer', { targetUserId });
     }
   });
   
   socket.on('answer', ({ targetUserId, answer }) => {
     const targetSocketId = activeUsers.get(targetUserId);
     if (targetSocketId) {
+      log('debug', 'Forwarding answer', { from: currentUserId, to: targetUserId });
       io.to(targetSocketId).emit('answer', { answer, fromUserId: currentUserId });
+    } else {
+      log('warn', 'Target user not found for answer', { targetUserId });
     }
   });
   
   socket.on('ice-candidate', ({ targetUserId, candidate }) => {
     const targetSocketId = activeUsers.get(targetUserId);
     if (targetSocketId) {
+      log('debug', 'Forwarding ICE candidate', { from: currentUserId, to: targetUserId });
       io.to(targetSocketId).emit('ice-candidate', { candidate, fromUserId: currentUserId });
     }
   });
@@ -202,7 +220,7 @@ io.on('connection', (socket) => {
   // Обработка отключения
   socket.on('disconnect', () => {
     if (currentUserId) {
-      console.log('User disconnected:', currentUserId);
+      log('info', 'User disconnected', { userId: currentUserId });
       activeUsers.delete(currentUserId);
       
       // Уведомление другого пользователя
@@ -218,7 +236,7 @@ io.on('connection', (socket) => {
   
   // Обработка ошибок
   socket.on('error', (error) => {
-    console.error('Socket error:', error);
+    log('error', 'Socket error', { error });
   });
 });
 
@@ -233,23 +251,25 @@ app.get('/health', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`MotoTalk server running on port ${PORT}`);
-  console.log(`Max users: ${MAX_USERS}`);
+  log('info', `MotoTalk server running on port ${PORT}`);
+  log('info', `Max users: ${MAX_USERS}`);
 });
 
 // Корректное завершение
 process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully');
+  log('info', 'SIGTERM received, shutting down gracefully');
   server.close(() => {
     db.close();
+    log('info', 'Server shutdown complete');
     process.exit(0);
   });
 });
 
 process.on('SIGINT', () => {
-  console.log('SIGINT received, shutting down gracefully');
+  log('info', 'SIGINT received, shutting down gracefully');
   server.close(() => {
     db.close();
+    log('info', 'Server shutdown complete');
     process.exit(0);
   });
 });

@@ -111,21 +111,19 @@ class VoiceControlService extends ChangeNotifier {
   }
 
   void _processVoiceCommand(String words) {
-    if (result.finalResult) {
-      // Check for start commands
-      for (final command in Config.voiceCommandsStart) {
-        if (words.contains(command)) {
-          _startTransmission();
-          return;
-        }
+    // Check for start commands
+    for (final command in Config.voiceCommandsStart) {
+      if (words.contains(command)) {
+        _startTransmission();
+        return;
       }
+    }
 
-      // Check for stop commands
-      for (final command in Config.voiceCommandsStop) {
-        if (words.contains(command)) {
-          _stopTransmission();
-          return;
-        }
+    // Check for stop commands
+    for (final command in Config.voiceCommandsStop) {
+      if (words.contains(command)) {
+        _stopTransmission();
+        return;
       }
     }
   }

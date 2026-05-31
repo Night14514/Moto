@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config.dart';
@@ -88,9 +90,23 @@ class ConnectionService extends ChangeNotifier {
   }
 
   Future<Map<String, dynamic>> _httpPost(String endpoint, Map<String, dynamic> data) async {
-    // Простая реализация HTTP с использованием dart:io была бы здесь
-    // Пока возвращаем мок-ответ для разработки
-    return Future.value({'userId': 'mock_id', 'username': 'User'});
+    try {
+      final response = await http.post(
+        Uri.parse('${Config.serverUrl}$endpoint'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(data),
+      ).timeout(const Duration(seconds: 10));
+      
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      } else {
+        final errorData = jsonDecode(response.body) as Map<String, dynamic>;
+        return errorData;
+      }
+    } catch (e) {
+      print('HTTP request error: $e');
+      return {'error': 'Connection error'};
+    }
   }
 
   void connect() {

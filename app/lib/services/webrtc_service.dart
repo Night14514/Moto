@@ -120,7 +120,9 @@ class WebRTCService extends ChangeNotifier {
     await _getUserMedia();
 
     if (_localStream != null) {
-      _peerConnection!.addStream(_localStream!);
+      for (final track in _localStream!.getTracks()) {
+        _peerConnection!.addTrack(track, _localStream!);
+      }
     }
 
     final offer = await _peerConnection!.createOffer();
@@ -138,7 +140,9 @@ class WebRTCService extends ChangeNotifier {
     await _getUserMedia();
 
     if (_localStream != null) {
-      _peerConnection!.addStream(_localStream!);
+      for (final track in _localStream!.getTracks()) {
+        _peerConnection!.addTrack(track, _localStream!);
+      }
     }
 
     await _peerConnection!.setRemoteDescription(
