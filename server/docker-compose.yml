@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  server:
+    build: .
+    container_name: mototalk-server
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+    restart: unless-stopped
+    networks:
+      - mototalk-network
+
+networks:
+  mototalk-network:
+    driver: bridge

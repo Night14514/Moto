@@ -1,0 +1,55 @@
+name: mototalk
+description: MotoTalk - PTT Voice Communication for Motorcyclists
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # WebRTC
+  flutter_webrtc: ^0.9.48
+  
+  # WebSocket
+  socket_io_client: ^2.0.3+1
+  
+  # Audio
+  audio_manager: ^0.0.2
+  just_audio: ^0.9.36
+  audioplayers: ^5.2.1
+  
+  # Speech Recognition
+  speech_to_text: ^6.6.0
+  
+  # Permissions
+  permission_handler: ^11.0.1
+  
+  # State Management
+  provider: ^6.1.1
+  
+  # Storage
+  shared_preferences: ^2.2.2
+  
+  # UI
+  cupertino_icons: ^1.0.6
+  flutter_animate: ^4.3.0
+  shimmer: ^3.0.0
+  
+  # Utils
+  uuid: ^4.2.1
+  crypto: ^3.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/images/
+    - assets/audio/
