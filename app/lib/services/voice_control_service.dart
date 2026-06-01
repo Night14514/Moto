@@ -89,7 +89,7 @@ class VoiceControlService extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _onSpeechResult(SpeechRecognitionResult result) {
+  void _onSpeechResult(dynamic result) {
     final words = result.recognizedWords.toLowerCase();
     _lastRecognizedWords = words;
     

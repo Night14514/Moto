@@ -1,6 +1,6 @@
 class Config {
   // Конфигурация сервера - обновите на IP-адрес вашего ПК
-  static const String serverUrl = 'http://192.168.1.100:3000';
+  static const String serverUrl = 'http://172.20.117.231:3000';
   
   // Конфигурация WebRTC
   static const Map<String, dynamic> rtcConfiguration = {

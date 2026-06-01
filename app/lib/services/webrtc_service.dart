@@ -77,9 +77,9 @@ class WebRTCService extends ChangeNotifier {
       _audioService.stopPlaying();
     };
 
-    _peerConnection!.onTrack = (track) {
-      print('Track added: ${track.kind}');
-      if (track.kind == 'audio') {
+    _peerConnection!.onTrack = (RTCTrackEvent event) {
+      print('Track added: ${event.track.kind}');
+      if (event.track.kind == 'audio') {
         _audioService.startPlaying();
       }
     };
@@ -131,7 +131,7 @@ class WebRTCService extends ChangeNotifier {
     _connectionService.sendOffer(_connectionService.peerId!, offer.toMap());
   }
 
-  Future<void handleOffer(Map<String, dynamic> offer) async {
+  Future<void> handleOffer(Map<String, dynamic> offer) async {
     if (_isInitiator) {
       return;
     }
@@ -155,7 +155,7 @@ class WebRTCService extends ChangeNotifier {
     _connectionService.sendAnswer(_connectionService.peerId!, answer.toMap());
   }
 
-  Future<void handleAnswer(Map<String, dynamic> answer) async {
+  Future<void> handleAnswer(Map<String, dynamic> answer) async {
     if (!_isInitiator) {
       return;
     }
@@ -165,7 +165,7 @@ class WebRTCService extends ChangeNotifier {
     );
   }
 
-  Future<void handleIceCandidate(Map<String, dynamic> candidate) async {
+  Future<void> handleIceCandidate(Map<String, dynamic> candidate) async {
     if (_peerConnection != null) {
       await _peerConnection!.addCandidate(
         RTCIceCandidate(
@@ -235,8 +235,9 @@ class WebRTCService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> dispose() async {
-    await _cleanup();
+  @override
+  void dispose() {
+    _cleanup();
     _connectionService.removeListener(_onConnectionServiceChanged);
     super.dispose();
   }

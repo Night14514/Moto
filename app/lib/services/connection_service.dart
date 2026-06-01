@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -96,16 +97,22 @@ class ConnectionService extends ChangeNotifier {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(data),
       ).timeout(const Duration(seconds: 10));
-      
+
       if (response.statusCode == 200 || response.statusCode == 201) {
         return jsonDecode(response.body) as Map<String, dynamic>;
       } else {
-        final errorData = jsonDecode(response.body) as Map<String, dynamic>;
-        return errorData;
+        if (response.body.isNotEmpty) {
+          try {
+            return jsonDecode(response.body) as Map<String, dynamic>;
+          } catch (_) {
+            return {'error': response.body};
+          }
+        }
+        return {'error': 'Server error: ${response.statusCode}'};
       }
     } catch (e) {
       print('HTTP request error: $e');
-      return {'error': 'Connection error'};
+      return {'error': 'Connection error: $e'};
     }
   }
 

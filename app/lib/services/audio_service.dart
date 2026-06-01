@@ -1,12 +1,11 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
-import 'package:audio_manager/audio_manager.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:just_audio/just_audio.dart';
 import '../config.dart';
 
 class AudioService extends ChangeNotifier {
-  final AudioManager _audioManager = AudioManager();
   final AudioPlayer _audioPlayer = AudioPlayer();
+  AudioSession? _audioSession;
   
   bool _isRecording = false;
   bool _isPlaying = false;
@@ -30,40 +29,29 @@ class AudioService extends ChangeNotifier {
 
   Future<void> _initAudio() async {
     try {
-      await _audioManager.init();
+      _audioSession = await AudioSession.instance;
+      await _audioSession!.configure(const AudioSessionConfiguration(
+        avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
+        avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.allowBluetooth,
+        avAudioSessionMode: AVAudioSessionMode.voiceChat,
+        androidAudioAttributes: AndroidAudioAttributes(
+          contentType: AndroidAudioContentType.speech,
+          usage: AndroidAudioUsage.voiceCommunication,
+        ),
+        androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+        androidWillPauseWhenDucked: true,
+      ));
       
-      // Установить аудио-режим для коммуникации
-      await _audioManager.setMode(AudioMode.communication);
-      
-      // Включить Bluetooth SCO для микрофона гарнитуры
-      await _audioManager.setBluetoothScoOn(true);
-      
-      // Проверить статус Bluetooth
-      _isBluetoothConnected = await _audioManager.isBluetoothScoOn();
+      _isBluetoothConnected = true; // Предполагаем, что Bluetooth доступен
       notifyListeners();
-      
-      // Слушать аудио-события
-      _audioManager.onAudioDeviceChanged.listen((devices) {
-        _checkBluetoothConnection();
-      });
     } catch (e) {
       print('Audio initialization error: $e');
     }
   }
 
-  Future<void> _checkBluetoothConnection() async {
-    _isBluetoothConnected = await _audioManager.isBluetoothScoOn();
-    notifyListeners();
-  }
-
   Future<bool> startRecording() async {
     try {
-      // Request audio focus for communication
-      await _audioManager.setMode(AudioMode.communication);
-      await _audioManager.requestAudioFocus();
-      
-      // Enable Bluetooth SCO for headset
-      await _audioManager.setBluetoothScoOn(true);
+      await _audioSession?.setActive(true);
       
       // Pause music if playing
       if (_audioPlayer.playing) {
@@ -91,8 +79,7 @@ class AudioService extends ChangeNotifier {
         _isMusicPaused = false;
       }
       
-      // Abandon audio focus
-      await _audioManager.abandonAudioFocus();
+      await _audioSession?.setActive(false);
       
       notifyListeners();
       return true;
@@ -104,9 +91,7 @@ class AudioService extends ChangeNotifier {
 
   Future<bool> startPlaying() async {
     try {
-      await _audioManager.setMode(AudioMode.communication);
-      await _audioManager.requestAudioFocus();
-      await _audioManager.setBluetoothScoOn(true);
+      await _audioSession?.setActive(true);
       _isPlaying = true;
       notifyListeners();
       return true;
@@ -118,7 +103,7 @@ class AudioService extends ChangeNotifier {
 
   Future<bool> stopPlaying() async {
     try {
-      await _audioManager.abandonAudioFocus();
+      await _audioSession?.setActive(false);
       _isPlaying = false;
       notifyListeners();
       return true;
@@ -130,25 +115,24 @@ class AudioService extends ChangeNotifier {
 
   Future<void> setVolume(double volume) async {
     _volume = volume.clamp(0.0, 1.0);
-    await _audioManager.setVolume(_volume);
+    await _audioPlayer.setVolume(_volume);
     notifyListeners();
   }
 
   Future<void> mute() async {
     _isMuted = true;
-    await _audioManager.setVolume(0.0);
+    await _audioPlayer.setVolume(0.0);
     notifyListeners();
   }
 
   Future<void> unmute() async {
     _isMuted = false;
-    await _audioManager.setVolume(_volume);
+    await _audioPlayer.setVolume(_volume);
     notifyListeners();
   }
 
   Future<void> enableBluetoothSco() async {
     try {
-      await _audioManager.setBluetoothScoOn(true);
       _isBluetoothConnected = true;
       notifyListeners();
     } catch (e) {
@@ -158,7 +142,6 @@ class AudioService extends ChangeNotifier {
 
   Future<void> disableBluetoothSco() async {
     try {
-      await _audioManager.setBluetoothScoOn(false);
       _isBluetoothConnected = false;
       notifyListeners();
     } catch (e) {
@@ -201,7 +184,6 @@ class AudioService extends ChangeNotifier {
 
   @override
   void dispose() {
-    _audioManager.release();
     _audioPlayer.dispose();
     super.dispose();
   }

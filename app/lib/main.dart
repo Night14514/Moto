@@ -47,8 +47,14 @@ class MotoTalkApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => ConnectionService()),
         ChangeNotifierProvider(create: (_) => AudioService()),
-        ChangeNotifierProvider(create: (_) => WebRTCService()),
         ChangeNotifierProvider(create: (_) => VoiceControlService()),
+        ChangeNotifierProxyProvider2<ConnectionService, AudioService, WebRTCService>(
+          create: (context) => WebRTCService(
+            context.read<ConnectionService>(),
+            context.read<AudioService>(),
+          ),
+          update: (context, connection, audio, previous) => previous!,
+        ),
       ],
       child: MaterialApp(
         title: 'MotoTalk',

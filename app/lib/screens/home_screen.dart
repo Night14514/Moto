@@ -61,27 +61,31 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A14),
       body: SafeArea(
-        child: Consumer5<ConnectionService, AudioService, WebRTCService, 
-                      VoiceControlService, VoiceControlService>(
-          builder: (context, connection, audio, webrtc, voice, voiceControl, _) {
+        child: Consumer<ConnectionService>(
+          builder: (context, connection, _) {
             // Проверка авторизации пользователя
             if (!connection.isAuthenticated && connection.userId == null) {
               return const LoginScreen();
             }
 
-            return Column(
-              children: [
-                _buildHeader(connection),
-                const SizedBox(height: 20),
-                _buildStatusCards(connection, audio, webrtc),
-                const SizedBox(height: 30),
-                _buildModeSelector(voiceControl),
-                const Spacer(),
-                _buildPttButton(connection, webrtc, voiceControl),
-                const SizedBox(height: 40),
-                _buildPeerStatus(connection),
-                const SizedBox(height: 20),
-              ],
+            return Consumer4<AudioService, WebRTCService, 
+                      VoiceControlService, VoiceControlService>(
+              builder: (context, audio, webrtc, voice, voiceControl, _) {
+                return Column(
+                  children: [
+                    _buildHeader(connection),
+                    const SizedBox(height: 20),
+                    _buildStatusCards(connection, audio, webrtc),
+                    const SizedBox(height: 30),
+                    _buildModeSelector(voiceControl),
+                    const Spacer(),
+                    _buildPttButton(connection, webrtc, voiceControl),
+                    const SizedBox(height: 40),
+                    _buildPeerStatus(connection),
+                    const SizedBox(height: 20),
+                  ],
+                );
+              },
             );
           },
         ),
@@ -406,20 +410,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 : const Color(0xFF00FF88),
               shape: BoxShape.circle,
             ),
-            if (connection.peerTalking)
-              ...List.generate(2, (index) => 
-                Container(
-                  width: 12,
-                  height: 12,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF00D4FF),
-                    shape: BoxShape.circle,
-                  ),
-                ).animate(onPlay: (controller) => controller.repeat())
-                  .fadeIn(duration: 300.ms, delay: (index + 1) * 150.ms)
-                  .then().fadeOut(duration: 300.ms),
-              ),
           ),
+          if (connection.peerTalking)
+            ...List.generate(2, (index) => 
+              Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF00D4FF),
+                  shape: BoxShape.circle,
+                ),
+              ).animate(onPlay: (controller) => controller.repeat())
+                .fadeIn(duration: 300.ms, delay: Duration(milliseconds: (index + 1) * 150))
+                .then().fadeOut(duration: 300.ms),
+            ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
