@@ -137,50 +137,6 @@ adb logcat | grep mototalk
 adb shell dumpsys activity services | grep mototalk
 ```
 
-## Установка на iOS
-
-### Предварительные требования
-- macOS с Xcode 14+
-- iOS 16 или выше
-- Apple Developer Account (для реального устройства)
-- CocoaPods
-
-### Сборка IPA
-```bash
-cd /opt/mototalk/app
-
-# Установка зависимостей
-flutter pub get
-cd ios
-pod install
-cd ..
-
-# Сборка для iOS
-flutter build ios --release
-```
-
-### Настройка в Xcode
-1. Откройте `ios/Runner.xcworkspace` в Xcode
-2. Выберите свой Team в Signing & Capabilities
-3. Настройте Bundle Identifier
-4. Соберите и запустите на устройстве
-
-### Установка через TestFlight (опционально)
-1. Загрузите в App Store Connect
-2. Создайте группу внутреннего тестирования
-3. Пригласите тестировщиков
-
-### Разрешения iOS
-Приложение использует следующие разрешения:
-- **Микрофон** - для голосовой связи
-- **Bluetooth** - для подключения гарнитуры
-- **Фоновый режим** - audio, voip, fetch, remote-notification
-
-### Отладка
-```bash
-# Просмотр логов через Xcode
-# Window > Devices and Simulators > Выберите устройство > View Device Logs
-```
 
 ## Настройка TURN сервера (опционально)
 

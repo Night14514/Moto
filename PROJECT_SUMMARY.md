@@ -2,7 +2,7 @@
 
 ## Обзор
 
-Полное кроссплатформенное приложение Push-to-Talk (PTT) для голосовой связи двух мотоциклистов с голосовым управлением, интеграцией музыки и премиум тёмным интерфейсом.
+Полное Android-приложение Push-to-Talk (PTT) для голосовой связи двух мотоциклистов с голосовым управлением, интеграцией музыки и премиум тёмным интерфейсом.
 
 ## Технологический стек (всё бесплатно и self-hosted)
 
@@ -14,7 +14,7 @@
 - **Docker** - Контейнеризация
 
 ### Frontend
-- **Flutter 3.19+** - Кроссплатформенный фреймворк
+- **Flutter 3.19+** - Android-фреймворк
 - **flutter_webrtc** - Реализация WebRTC
 - **socket_io_client** - WebSocket клиент
 - **speech_to_text** - Локальное распознавание речи
@@ -51,13 +51,10 @@
 │   │   └── app/src/main/
 │   │       ├── AndroidManifest.xml
 │   │       └── kotlin/.../MainActivity.kt
-│   ├── ios/                  # Конфигурация iOS
-│   │   ├── Runner/Info.plist
-│   │   └── Podfile
 │   └── pubspec.yaml          # Зависимости Flutter
 └── docs/                    # Документация
     ├── ARCHITECTURE.md              # Архитектура системы
-    ├── PLATFORM_LIMITATIONS.md     # Ограничения Android/iOS
+    ├── PLATFORM_LIMITATIONS.md     # Ограничения Android
     ├── SERVER_SETUP.md             # Развертывание сервера
     ├── APP_BUILD.md                # Сборка приложения
     ├── DEVELOPMENT_PLAN.md         # План разработки
@@ -84,7 +81,6 @@
 
 ### ✅ Поддержка платформ
 - Android 11+ с foreground service
-- iOS 16+ с режимом фонового аудио
 - Bluetooth-наушники (AirPods, Galaxy Buds и др.)
 - Поддержка работы в фоновом режиме
 
@@ -148,13 +144,6 @@ static const List<String> voiceCommandsStop = ['стоп', 'отбой'];
 - Требуется управление аудио-фокусом
 - Разрешения: RECORD_AUDIO, BLUETOOTH_CONNECT, FOREGROUND_SERVICE
 
-### iOS
-- Требуется CallKit для оптимальной фоновой работы
-- Разрешения Bluetooth в Info.plist
-- Конфигурация режима фонового аудио
-- VoIP push-уведомления для пробуждения
-
-Подробнее см. [PLATFORM_LIMITATIONS.md](docs/PLATFORM_LIMITATIONS.md).
 
 ## План разработки
 
@@ -192,7 +181,6 @@ static const List<String> voiceCommandsStop = ['стоп', 'отбой'];
 
 ### Специфично для платформ
 - [ ] Работает на Android 11+
-- [ ] Работает на iOS 16+
 - [ ] Работает с AirPods
 - [ ] Работает с Galaxy Buds
 - [ ] Работает в фоновом режиме
@@ -224,7 +212,7 @@ static const List<String> voiceCommandsStop = ['стоп', 'отбой'];
 
 1. **Обновите URL сервера** в `app/lib/config.dart` на IP вашего ПК
 2. **Запустите сервер** с `docker-compose up -d`
-3. **Соберите приложение** для Android/iOS
+3. **Соберите приложение** для Android
 4. **Протестируйте на реальных устройствах** с Bluetooth-наушниками
 5. **Протестируйте в реальных условиях езды**
 6. **Оптимизируйте на основе обратной связи**

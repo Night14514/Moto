@@ -1,0 +1,54 @@
+# === Android / Flutter release artifacts ===
+*.apk
+*.aab
+*.ap_
+*.dex
+*.apk.sha1
+**/outputs/flutter-apk/
+**/outputs/apk/
+**/outputs/bundle/
+releases/
+dist/
+*.ipa
+
+# Flutter / Dart
+app/build/
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/.packages
+app/.pub-cache/
+app/.pub/
+**/Generated.xcconfig
+**/flutter_export_environment.sh
+
+# Android
+app/android/.gradle/
+app/android/local.properties
+app/android/**/capture/
+app/android/**/build/
+*.keystore
+*.jks
+key.properties
+
+# iOS (removed, ignore leftovers)
+app/ios/
+
+# Node / server
+server/node_modules/
+server/data/*.db
+server/data/*.db-*
+server/logs/
+server/.env
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+*.swp
+*~
+
+# Misc
+*.log
+.cxx/

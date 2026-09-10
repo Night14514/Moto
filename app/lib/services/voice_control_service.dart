@@ -8,6 +8,8 @@ enum VoiceControlMode {
   voice,
 }
 
+typedef VoiceTransmitCallback = Future<void> Function();
+
 class VoiceControlService extends ChangeNotifier {
   final SpeechToText _speechToText = SpeechToText();
   VoiceControlMode _mode = VoiceControlMode.ptt;
@@ -17,7 +19,10 @@ class VoiceControlService extends ChangeNotifier {
   Timer? _silenceTimer;
   Timer? _debounceTimer;
 
-  // Геттеры
+  /// Wired from UI / composition root to WebRTC PTT start/stop.
+  VoiceTransmitCallback? onStartTransmit;
+  VoiceTransmitCallback? onStopTransmit;
+
   VoiceControlMode get mode => _mode;
   bool get isListening => _isListening;
   bool get isTransmitting => _isTransmitting;
@@ -31,20 +36,20 @@ class VoiceControlService extends ChangeNotifier {
     try {
       final available = await _speechToText.initialize();
       if (!available) {
-        print('Speech recognition not available');
+        debugPrint('VoiceControl: speech recognition not available');
       }
-    } catch (e) {
-      print('Speech recognition initialization error: $e');
+    } catch (e, st) {
+      debugPrint('VoiceControl: init error: $e\n$st');
     }
   }
 
   void setMode(VoiceControlMode mode) {
     _mode = mode;
-    
+
     if (mode == VoiceControlMode.ptt && _isListening) {
       stopListening();
     }
-    
+
     notifyListeners();
   }
 
@@ -54,7 +59,7 @@ class VoiceControlService extends ChangeNotifier {
     }
 
     if (!_speechToText.isAvailable) {
-      print('Speech recognition not available');
+      debugPrint('VoiceControl: speech recognition not available');
       return false;
     }
 
@@ -63,20 +68,19 @@ class VoiceControlService extends ChangeNotifier {
         onResult: _onSpeechResult,
         listenFor: const Duration(minutes: 30),
         pauseFor: const Duration(seconds: 3),
-        partialResults: true,
         localeId: 'ru_RU',
-        listenMode: ListenMode.confirmation,
-        cancelOnError: true,
-        onSoundLevelChange: (level) {
-          // Could be used for voice activity detection
-        },
+        listenOptions: SpeechListenOptions(
+          partialResults: true,
+          listenMode: ListenMode.confirmation,
+          cancelOnError: true,
+        ),
       );
 
       _isListening = true;
       notifyListeners();
       return true;
-    } catch (e) {
-      print('Start listening error: $e');
+    } catch (e, st) {
+      debugPrint('VoiceControl: startListening error: $e\n$st');
       return false;
     }
   }
@@ -92,68 +96,71 @@ class VoiceControlService extends ChangeNotifier {
   void _onSpeechResult(dynamic result) {
     final words = result.recognizedWords.toLowerCase();
     _lastRecognizedWords = words;
-    
-    print('Recognized: $words (confidence: ${result.finalResult})');
 
-    // Reset silence timer on any speech
+    debugPrint(
+      'VoiceControl: recognized "$words" final=${result.finalResult}',
+    );
+
     _silenceTimer?.cancel();
     _silenceTimer = Timer(const Duration(seconds: 5), () {
-      // No speech for 5 seconds, could indicate end of command
-      print('Silence detected');
+      debugPrint('VoiceControl: silence detected');
     });
 
-    // Debounce to avoid rapid false positives
     _debounceTimer?.cancel();
     _debounceTimer = Timer(
-      Duration(milliseconds: Config.voiceCommandDebounceMs),
+      Duration(milliseconds: AppConfig.voiceCommandDebounceMs),
       () => _processVoiceCommand(words),
     );
   }
 
   void _processVoiceCommand(String words) {
-    // Check for start commands
-    for (final command in Config.voiceCommandsStart) {
+    for (final command in AppConfig.voiceCommandsStart) {
       if (words.contains(command)) {
-        _startTransmission();
+        unawaited(_startTransmission());
         return;
       }
     }
 
-    // Check for stop commands
-    for (final command in Config.voiceCommandsStop) {
+    for (final command in AppConfig.voiceCommandsStop) {
       if (words.contains(command)) {
-        _stopTransmission();
+        unawaited(_stopTransmission());
         return;
       }
     }
   }
 
-  void _startTransmission() {
-    if (!_isTransmitting) {
-      _isTransmitting = true;
-      notifyListeners();
-      // Signal to start PTT transmission
-      // This will be handled by the UI layer
-    }
-  }
-
-  void _stopTransmission() {
-    if (_isTransmitting) {
+  Future<void> _startTransmission() async {
+    if (_isTransmitting) return;
+    _isTransmitting = true;
+    notifyListeners();
+    try {
+      await onStartTransmit?.call();
+    } catch (e, st) {
+      debugPrint('VoiceControl: onStartTransmit failed: $e\n$st');
       _isTransmitting = false;
       notifyListeners();
-      // Signal to stop PTT transmission
-      // This will be handled by the UI layer
+    }
+  }
+
+  Future<void> _stopTransmission() async {
+    if (!_isTransmitting) return;
+    _isTransmitting = false;
+    notifyListeners();
+    try {
+      await onStopTransmit?.call();
+    } catch (e, st) {
+      debugPrint('VoiceControl: onStopTransmit failed: $e\n$st');
     }
   }
 
   bool isStartCommand(String words) {
     final lowerWords = words.toLowerCase();
-    return Config.voiceCommandsStart.any((cmd) => lowerWords.contains(cmd));
+    return AppConfig.voiceCommandsStart.any((cmd) => lowerWords.contains(cmd));
   }
 
   bool isStopCommand(String words) {
     final lowerWords = words.toLowerCase();
-    return Config.voiceCommandsStop.any((cmd) => lowerWords.contains(cmd));
+    return AppConfig.voiceCommandsStop.any((cmd) => lowerWords.contains(cmd));
   }
 
   @override

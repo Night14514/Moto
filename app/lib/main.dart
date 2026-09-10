@@ -2,24 +2,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'config.dart';
 import 'screens/home_screen.dart';
 import 'services/connection_service.dart';
 import 'services/audio_service.dart';
 import 'services/webrtc_service.dart';
 import 'services/voice_control_service.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // Установить предпочтительные ориентации
+
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
   ]);
-  
-  // Запросить разрешения
+
+  final appConfig = AppConfig();
+  await appConfig.load();
   await _requestPermissions();
-  
-  runApp(const MotoTalkApp());
+
+  runApp(MotoTalkApp(appConfig: appConfig));
 }
 
 Future<void> _requestPermissions() async {
@@ -29,26 +30,33 @@ Future<void> _requestPermissions() async {
     Permission.bluetoothConnect,
     Permission.notification,
   ];
-  
+
   for (final permission in permissions) {
-    final status = await permission.request();
-    if (status.isDenied) {
-      print('Permission denied: $permission');
+    try {
+      await permission.request();
+    } catch (e) {
+      debugPrint('Permission request failed: $permission $e');
     }
   }
 }
 
 class MotoTalkApp extends StatelessWidget {
-  const MotoTalkApp({super.key});
+  final AppConfig appConfig;
+
+  const MotoTalkApp({super.key, required this.appConfig});
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => ConnectionService()),
+        ChangeNotifierProvider<AppConfig>.value(value: appConfig),
+        ChangeNotifierProvider(
+          create: (ctx) => ConnectionService(ctx.read<AppConfig>()),
+        ),
         ChangeNotifierProvider(create: (_) => AudioService()),
         ChangeNotifierProvider(create: (_) => VoiceControlService()),
-        ChangeNotifierProxyProvider2<ConnectionService, AudioService, WebRTCService>(
+        ChangeNotifierProxyProvider2<ConnectionService, AudioService,
+            WebRTCService>(
           create: (context) => WebRTCService(
             context.read<ConnectionService>(),
             context.read<AudioService>(),
@@ -80,7 +88,7 @@ class MotoTalkApp extends StatelessWidget {
         elevation: 0,
         centerTitle: true,
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: const Color(0xFF1A1A2E),
         elevation: 8,
         shape: RoundedRectangleBorder(

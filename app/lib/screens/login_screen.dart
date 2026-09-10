@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import '../config.dart';
 import '../services/connection_service.dart';
+import 'settings_screen.dart';
 
+/// Join shared room: both riders enter the SAME 4-digit PIN + own names.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -15,8 +18,22 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _pinController = TextEditingController();
   final _usernameController = TextEditingController();
-  bool _isRegistering = false;
   bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final connection = context.read<ConnectionService>();
+      if (connection.username != null) {
+        _usernameController.text = connection.username!;
+      }
+      if (connection.pin != null) {
+        _pinController.text = connection.pin!;
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -25,31 +42,21 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  Future<void> _handleSubmit() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+  Future<void> _handleJoin() async {
+    if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
-
-    final connectionService = context.read<ConnectionService>();
-    bool success;
-
-    if (_isRegistering) {
-      success = await connectionService.register(
-        _pinController.text,
-        _usernameController.text,
-      );
-    } else {
-      success = await connectionService.login(_pinController.text);
-    }
-
+    final connection = context.read<ConnectionService>();
+    final ok = await connection.joinRoom(
+      _pinController.text,
+      _usernameController.text,
+    );
     setState(() => _isLoading = false);
 
-    if (success) {
-      connectionService.connect();
+    if (ok) {
+      connection.connect();
     } else {
-      _showError(_isRegistering ? 'Ошибка регистрации' : 'Неверный PIN');
+      _showError(connection.lastError ?? 'Не удалось войти в комнату');
     }
   }
 
@@ -65,6 +72,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final serverUrl = context.watch<AppConfig>().serverUrl;
+
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A14),
       body: SafeArea(
@@ -77,16 +86,70 @@ class _LoginScreenState extends State<LoginScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   _buildLogo(),
-                  const SizedBox(height: 40),
-                  _buildTitle(),
-                  const SizedBox(height: 40),
-                  if (_isRegistering) _buildUsernameField(),
-                  if (_isRegistering) const SizedBox(height: 20),
+                  const SizedBox(height: 32),
+                  Text(
+                    'MotoTalk',
+                    style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                          color: const Color(0xFF00D4FF),
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ).animate().fadeIn(duration: 500.ms),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Оба вводят один PIN комнаты\nи свои имена (макс. 2)',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Color(0xFF808090), height: 1.4),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    serverUrl,
+                    style: const TextStyle(
+                      color: Color(0xFF00D4FF),
+                      fontSize: 12,
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const SettingsScreen(),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.settings, size: 18),
+                    label: const Text('Адрес сервера'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFF00D4FF),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  _buildUsernameField(),
+                  const SizedBox(height: 16),
                   _buildPinField(),
-                  const SizedBox(height: 30),
-                  _buildSubmitButton(),
-                  const SizedBox(height: 20),
-                  _buildToggleMode(),
+                  const SizedBox(height: 28),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: ElevatedButton(
+                      onPressed: _isLoading ? null : _handleJoin,
+                      child: _isLoading
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Color(0xFF0A0A14),
+                              ),
+                            )
+                          : const Text(
+                              'Войти в комнату',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -98,178 +161,72 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Widget _buildLogo() {
     return Container(
-      width: 120,
-      height: 120,
+      width: 100,
+      height: 100,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
           colors: [Color(0xFF00D4FF), Color(0xFF0066FF)],
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF00D4FF).withOpacity(0.5),
-            blurRadius: 30,
-            spreadRadius: 10,
+            color: const Color(0xFF00D4FF).withValues(alpha: 0.4),
+            blurRadius: 24,
+            spreadRadius: 4,
           ),
         ],
       ),
-      child: const Icon(
-        Icons.motorcycle,
-        size: 60,
-        color: Colors.white,
-      ),
-    ).animate().fadeIn(duration: 600.ms).scale();
-  }
-
-  Widget _buildTitle() {
-    return Column(
-      children: [
-        Text(
-          'MotoTalk',
-          style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-            color: const Color(0xFF00D4FF),
-            fontWeight: FontWeight.bold,
-          ),
-        ).animate().fadeIn(duration: 600.ms).slideY(begin: 0.3),
-        const SizedBox(height: 8),
-        Text(
-          _isRegistering ? 'Создайте аккаунт' : 'Войдите в систему',
-          style: Theme.of(context).textTheme.bodyLarge,
-        ).animate().fadeIn(duration: 600.ms, delay: 100.ms).slideY(begin: 0.3),
-      ],
-    );
+      child: const Icon(Icons.motorcycle, size: 48, color: Colors.white),
+    ).animate().fadeIn(duration: 500.ms).scale();
   }
 
   Widget _buildUsernameField() {
     return TextFormField(
       controller: _usernameController,
       style: const TextStyle(color: Colors.white),
-      decoration: InputDecoration(
-        labelText: 'Имя пользователя',
-        labelStyle: const TextStyle(color: Color(0xFF808090)),
-        prefixIcon: const Icon(Icons.person, color: Color(0xFF00D4FF)),
-        filled: true,
-        fillColor: const Color(0xFF1A1A2E),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF1A1A2E)),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF1A1A2E)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF00D4FF), width: 2),
-        ),
-      ),
-      validator: (value) {
-        if (value == null || value.isEmpty) {
-          return 'Введите имя пользователя';
-        }
+      textInputAction: TextInputAction.next,
+      decoration: _decoration('Ваше имя', Icons.person),
+      validator: (v) {
+        if (v == null || v.trim().isEmpty) return 'Введите имя';
         return null;
       },
-    ).animate().fadeIn(duration: 600.ms, delay: 200.ms).slideX(begin: -0.3);
+    );
   }
 
   Widget _buildPinField() {
     return TextFormField(
       controller: _pinController,
-      style: const TextStyle(color: Colors.white),
+      style: const TextStyle(color: Colors.white, letterSpacing: 8),
       keyboardType: TextInputType.number,
       maxLength: 4,
       obscureText: true,
-      decoration: InputDecoration(
-        labelText: 'PIN-код',
-        labelStyle: const TextStyle(color: Color(0xFF808090)),
-        prefixIcon: const Icon(Icons.lock, color: Color(0xFF00D4FF)),
-        filled: true,
-        fillColor: const Color(0xFF1A1A2E),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF1A1A2E)),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF1A1A2E)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF00D4FF), width: 2),
-        ),
-        counterText: '',
-      ),
+      decoration: _decoration('PIN комнаты', Icons.lock).copyWith(counterText: ''),
       inputFormatters: [
         FilteringTextInputFormatter.digitsOnly,
         LengthLimitingTextInputFormatter(4),
       ],
-      validator: (value) {
-        if (value == null || value.isEmpty) {
-          return 'Введите PIN-код';
-        }
-        if (value.length != 4) {
-          return 'PIN-код должен быть 4 цифры';
-        }
+      validator: (v) {
+        if (v == null || v.length != 4) return 'PIN — 4 цифры';
         return null;
       },
-    ).animate().fadeIn(duration: 600.ms, delay: 300.ms).slideX(begin: -0.3);
+    );
   }
 
-  Widget _buildSubmitButton() {
-    return SizedBox(
-      width: double.infinity,
-      height: 56,
-      child: ElevatedButton(
-        onPressed: _isLoading ? null : _handleSubmit,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF00D4FF),
-          foregroundColor: const Color(0xFF0A0A14),
-          elevation: 8,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-        child: _isLoading
-            ? const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF0A0A14)),
-                ),
-              )
-            : Text(
-                _isRegistering ? 'Создать аккаунт' : 'Войти',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+  InputDecoration _decoration(String label, IconData icon) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: Color(0xFF808090)),
+      prefixIcon: Icon(icon, color: const Color(0xFF00D4FF)),
+      filled: true,
+      fillColor: const Color(0xFF1A1A2E),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide.none,
       ),
-    ).animate().fadeIn(duration: 600.ms, delay: 400.ms).slideY(begin: 0.3);
-  }
-
-  Widget _buildToggleMode() {
-    return TextButton(
-      onPressed: _isLoading ? null : () {
-        setState(() {
-          _isRegistering = !_isRegistering;
-          _formKey.currentState?.reset();
-          _pinController.clear();
-          _usernameController.clear();
-        });
-      },
-      child: Text(
-        _isRegistering 
-          ? 'Уже есть аккаунт? Войти' 
-          : 'Нет аккаунта? Создать',
-        style: const TextStyle(
-          color: Color(0xFF00D4FF),
-          fontSize: 14,
-        ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFF00D4FF), width: 2),
       ),
-    ).animate().fadeIn(duration: 600.ms, delay: 500.ms);
+    );
   }
 }

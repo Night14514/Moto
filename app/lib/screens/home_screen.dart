@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import '../models/call_state.dart';
 import '../services/connection_service.dart';
 import '../services/audio_service.dart';
 import '../services/webrtc_service.dart';
 import '../services/voice_control_service.dart';
 import 'login_screen.dart';
+import 'settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -15,45 +17,81 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
+class _HomeScreenState extends State<HomeScreen>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   late AnimationController _pulseController;
   bool _isTransmitting = false;
+  bool _voiceWired = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _pulseController = AnimationController(
       duration: const Duration(milliseconds: 1500),
       vsync: this,
     )..repeat();
-    
-    // Автоматическое подключение если есть учетные данные
-    final connectionService = context.read<ConnectionService>();
-    if (connectionService.userId != null) {
-      connectionService.connect();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final connectionService = context.read<ConnectionService>();
+      if (connectionService.userId != null) {
+        connectionService.connect();
+      }
+      _wireVoiceControl();
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      final connection = context.read<ConnectionService>();
+      final webrtc = context.read<WebRTCService>();
+      if (connection.userId != null && !connection.isConnected) {
+        connection.reconnectNow();
+      } else if (connection.peerOnline) {
+        webrtc.ensureCall();
+      }
     }
+  }
+
+  void _wireVoiceControl() {
+    if (_voiceWired || !mounted) return;
+    final voice = context.read<VoiceControlService>();
+    final webrtc = context.read<WebRTCService>();
+    voice.onStartTransmit = () async {
+      setState(() => _isTransmitting = true);
+      await webrtc.startTransmitting();
+    };
+    voice.onStopTransmit = () async {
+      setState(() => _isTransmitting = false);
+      await webrtc.stopTransmitting();
+    };
+    _voiceWired = true;
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pulseController.dispose();
     super.dispose();
   }
 
-  void _handlePttStart() {
+  Future<void> _handlePttStart() async {
     setState(() => _isTransmitting = true);
     HapticFeedback.heavyImpact();
-    
-    final webrtcService = context.read<WebRTCService>();
-    webrtcService.startTransmitting();
+    await context.read<WebRTCService>().startTransmitting();
   }
 
-  void _handlePttEnd() {
+  Future<void> _handlePttEnd() async {
     setState(() => _isTransmitting = false);
     HapticFeedback.lightImpact();
-    
-    final webrtcService = context.read<WebRTCService>();
-    webrtcService.stopTransmitting();
+    await context.read<WebRTCService>().stopTransmitting();
+  }
+
+  void _openSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+    );
   }
 
   @override
@@ -63,17 +101,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       body: SafeArea(
         child: Consumer<ConnectionService>(
           builder: (context, connection, _) {
-            // Проверка авторизации пользователя
             if (!connection.isAuthenticated && connection.userId == null) {
               return const LoginScreen();
             }
 
-            return Consumer4<AudioService, WebRTCService, 
-                      VoiceControlService, VoiceControlService>(
-              builder: (context, audio, webrtc, voice, voiceControl, _) {
+            return Consumer3<AudioService, WebRTCService, VoiceControlService>(
+              builder: (context, audio, webrtc, voiceControl, _) {
                 return Column(
                   children: [
-                    _buildHeader(connection),
+                    _buildHeader(connection, webrtc),
                     const SizedBox(height: 20),
                     _buildStatusCards(connection, audio, webrtc),
                     const SizedBox(height: 30),
@@ -81,7 +117,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     const Spacer(),
                     _buildPttButton(connection, webrtc, voiceControl),
                     const SizedBox(height: 40),
-                    _buildPeerStatus(connection),
+                    _buildPeerStatus(connection, webrtc),
                     const SizedBox(height: 20),
                   ],
                 );
@@ -93,28 +129,40 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildHeader(ConnectionService connection) {
+  Widget _buildHeader(ConnectionService connection, WebRTCService webrtc) {
     return Container(
       padding: const EdgeInsets.all(20),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'MotoTalk',
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  color: const Color(0xFF00D4FF),
-                  fontWeight: FontWeight.bold,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'MotoTalk',
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                        color: const Color(0xFF00D4FF),
+                        fontWeight: FontWeight.bold,
+                      ),
                 ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                connection.username ?? 'Гость',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-            ],
+                const SizedBox(height: 4),
+                Text(
+                  connection.username ?? 'Гость',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                Text(
+                  'PIN ${connection.pin ?? "—"} · ${webrtc.callState.label}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFF808090),
+                      ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: _openSettings,
+            icon: const Icon(Icons.settings, color: Color(0xFF00D4FF)),
           ),
           _buildConnectionIndicator(connection),
         ],
@@ -124,13 +172,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   Widget _buildConnectionIndicator(ConnectionService connection) {
     final isConnected = connection.isConnected;
-    
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: isConnected 
-          ? const Color(0xFF00FF88).withOpacity(0.1)
-          : const Color(0xFFFF3366).withOpacity(0.1),
+        color: isConnected
+            ? const Color(0xFF00FF88).withOpacity(0.1)
+            : const Color(0xFFFF3366).withOpacity(0.1),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: isConnected ? const Color(0xFF00FF88) : const Color(0xFFFF3366),
@@ -146,9 +194,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               color: isConnected ? const Color(0xFF00FF88) : const Color(0xFFFF3366),
               shape: BoxShape.circle,
             ),
-          ).animate(onPlay: (controller) => controller.repeat())
-            .fadeIn(duration: 500.ms)
-            .then().fadeOut(duration: 500.ms),
+          )
+              .animate(onPlay: (controller) => controller.repeat())
+              .fadeIn(duration: 500.ms)
+              .then()
+              .fadeOut(duration: 500.ms),
           const SizedBox(width: 8),
           Text(
             isConnected ? 'Онлайн' : 'Оффлайн',
@@ -163,7 +213,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildStatusCards(ConnectionService connection, AudioService audio, WebRTCService webrtc) {
+  Widget _buildStatusCards(
+    ConnectionService connection,
+    AudioService audio,
+    WebRTCService webrtc,
+  ) {
+    final mediaOk = webrtc.callState.isMediaReady;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Row(
@@ -173,16 +228,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               'Сервер',
               connection.isConnected ? 'Подключен' : 'Отключен',
               connection.isConnected ? Icons.cloud_done : Icons.cloud_off,
-              connection.isConnected ? const Color(0xFF00FF88) : const Color(0xFFFF3366),
+              connection.isConnected
+                  ? const Color(0xFF00FF88)
+                  : const Color(0xFFFF3366),
             ),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: _buildStatusCard(
-              'Собеседник',
-              connection.peerOnline ? 'Онлайн' : 'Оффлайн',
-              connection.peerOnline ? Icons.person : Icons.person_outline,
-              connection.peerOnline ? const Color(0xFF00FF88) : const Color(0xFF808090),
+              'WebRTC',
+              mediaOk ? 'Аудио OK' : webrtc.callState.label,
+              mediaOk ? Icons.graphic_eq : Icons.graphic_eq_outlined,
+              mediaOk ? const Color(0xFF00FF88) : const Color(0xFF808090),
             ),
           ),
           const SizedBox(width: 12),
@@ -190,8 +247,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             child: _buildStatusCard(
               'Bluetooth',
               audio.isBluetoothConnected ? 'Активен' : 'Неактивен',
-              audio.isBluetoothConnected ? Icons.bluetooth : Icons.bluetooth_disabled,
-              audio.isBluetoothConnected ? const Color(0xFF00D4FF) : const Color(0xFF808090),
+              audio.isBluetoothConnected
+                  ? Icons.bluetooth
+                  : Icons.bluetooth_disabled,
+              audio.isBluetoothConnected
+                  ? const Color(0xFF00D4FF)
+                  : const Color(0xFF808090),
             ),
           ),
         ],
@@ -199,7 +260,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildStatusCard(String title, String status, IconData icon, Color color) {
+  Widget _buildStatusCard(
+    String title,
+    String status,
+    IconData icon,
+    Color color,
+  ) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -221,10 +287,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           const SizedBox(height: 4),
           Text(
             status,
+            textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: color,
-              fontWeight: FontWeight.w600,
-            ),
+                  color: color,
+                  fontWeight: FontWeight.w600,
+                ),
           ),
         ],
       ),
@@ -271,16 +338,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     IconData icon,
   ) {
     final isSelected = voiceControl.mode == mode;
-    
+
     return GestureDetector(
       onTap: () => voiceControl.setMode(mode),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          color: isSelected 
-            ? const Color(0xFF00D4FF).withOpacity(0.2)
-            : Colors.transparent,
+          color: isSelected
+              ? const Color(0xFF00D4FF).withOpacity(0.2)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: isSelected ? const Color(0xFF00D4FF) : Colors.transparent,
@@ -299,7 +366,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             Text(
               label,
               style: TextStyle(
-                color: isSelected ? const Color(0xFF00D4FF) : const Color(0xFF808090),
+                color:
+                    isSelected ? const Color(0xFF00D4FF) : const Color(0xFF808090),
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
               ),
             ),
@@ -309,68 +377,90 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildPttButton(ConnectionService connection, WebRTCService webrtc, VoiceControlService voiceControl) {
+  Widget _buildPttButton(
+    ConnectionService connection,
+    WebRTCService webrtc,
+    VoiceControlService voiceControl,
+  ) {
     final isVoiceMode = voiceControl.mode == VoiceControlMode.voice;
-    
+    final canTalk = webrtc.callState.isMediaReady;
+
     return Center(
       child: GestureDetector(
-        onLongPress: isVoiceMode ? null : _handlePttStart,
-        onLongPressEnd: isVoiceMode ? null : (_) => _handlePttEnd,
-        onTap: isVoiceMode ? () {
-          if (voiceControl.isListening) {
-            voiceControl.stopListening();
-          } else {
-            voiceControl.startListening();
-          }
-        } : null,
+        onLongPressStart: isVoiceMode || !canTalk
+            ? null
+            : (_) => _handlePttStart(),
+        onLongPressEnd: isVoiceMode || !canTalk
+            ? null
+            : (_) => _handlePttEnd(),
+        onTap: isVoiceMode
+            ? () {
+                if (voiceControl.isListening) {
+                  voiceControl.stopListening();
+                } else {
+                  voiceControl.startListening();
+                }
+              }
+            : null,
         child: AnimatedBuilder(
           animation: _pulseController,
           builder: (context, child) {
-            return Container(
-              width: 200,
-              height: 200,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    _isTransmitting 
-                      ? const Color(0xFF00D4FF).withOpacity(0.8)
-                      : const Color(0xFF0066FF).withOpacity(0.6),
-                    const Color(0xFF1A1A2E),
-                  ],
-                  stops: [_pulseController.value, 1.0],
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: (_isTransmitting ? const Color(0xFF00D4FF) : const Color(0xFF0066FF))
-                      .withOpacity(0.5),
-                    blurRadius: _isTransmitting ? 40 : 20,
-                    spreadRadius: _isTransmitting ? 10 : 5,
+            return Opacity(
+              opacity: canTalk || isVoiceMode ? 1.0 : 0.45,
+              child: Container(
+                width: 200,
+                height: 200,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      _isTransmitting
+                          ? const Color(0xFF00D4FF).withOpacity(0.8)
+                          : const Color(0xFF0066FF).withOpacity(0.6),
+                      const Color(0xFF1A1A2E),
+                    ],
+                    stops: [_pulseController.value, 1.0],
                   ),
-                ],
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    isVoiceMode 
-                      ? (voiceControl.isListening ? Icons.mic : Icons.mic_none)
-                      : (_isTransmitting ? Icons.radio_button_checked : Icons.radio_button_unchecked),
-                    size: 60,
-                    color: Colors.white,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    isVoiceMode 
-                      ? (voiceControl.isListening ? 'Слушаю...' : 'Нажми')
-                      : (_isTransmitting ? 'Передача' : 'Удерживай'),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
+                  boxShadow: [
+                    BoxShadow(
+                      color: (_isTransmitting
+                              ? const Color(0xFF00D4FF)
+                              : const Color(0xFF0066FF))
+                          .withOpacity(0.5),
+                      blurRadius: _isTransmitting ? 40 : 20,
+                      spreadRadius: _isTransmitting ? 10 : 5,
                     ),
-                  ),
-                ],
+                  ],
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      isVoiceMode
+                          ? (voiceControl.isListening
+                              ? Icons.mic
+                              : Icons.mic_none)
+                          : (_isTransmitting
+                              ? Icons.radio_button_checked
+                              : Icons.radio_button_unchecked),
+                      size: 60,
+                      color: Colors.white,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      isVoiceMode
+                          ? (voiceControl.isListening ? 'Слушаю...' : 'Нажми')
+                          : (!canTalk
+                              ? 'Ждём связь'
+                              : (_isTransmitting ? 'Передача' : 'Удерживай')),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             );
           },
@@ -379,23 +469,24 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildPeerStatus(ConnectionService connection) {
+  Widget _buildPeerStatus(ConnectionService connection, WebRTCService webrtc) {
     if (!connection.peerOnline) {
       return const SizedBox.shrink();
     }
+
+    // Driven by inbound WebRTC audio level (CallState.talking), not socket hint.
+    final talking = webrtc.partnerTalking;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: connection.peerTalking 
-          ? const Color(0xFF00D4FF).withOpacity(0.1)
-          : const Color(0xFF1A1A2E),
+        color: talking
+            ? const Color(0xFF00D4FF).withOpacity(0.1)
+            : const Color(0xFF1A1A2E),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: connection.peerTalking 
-            ? const Color(0xFF00D4FF)
-            : const Color(0xFF1A1A2E),
+          color: talking ? const Color(0xFF00D4FF) : const Color(0xFF1A1A2E),
           width: 1,
         ),
       ),
@@ -405,24 +496,30 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             width: 12,
             height: 12,
             decoration: BoxDecoration(
-              color: connection.peerTalking 
-                ? const Color(0xFF00D4FF)
-                : const Color(0xFF00FF88),
+              color: talking
+                  ? const Color(0xFF00D4FF)
+                  : const Color(0xFF00FF88),
               shape: BoxShape.circle,
             ),
           ),
-          if (connection.peerTalking)
-            ...List.generate(2, (index) => 
-              Container(
+          if (talking)
+            ...List.generate(
+              2,
+              (index) => Container(
                 width: 12,
                 height: 12,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF00D4FF),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF00D4FF),
                   shape: BoxShape.circle,
                 ),
-              ).animate(onPlay: (controller) => controller.repeat())
-                .fadeIn(duration: 300.ms, delay: Duration(milliseconds: (index + 1) * 150))
-                .then().fadeOut(duration: 300.ms),
+              )
+                  .animate(onPlay: (controller) => controller.repeat())
+                  .fadeIn(
+                    duration: 300.ms,
+                    delay: Duration(milliseconds: (index + 1) * 150),
+                  )
+                  .then()
+                  .fadeOut(duration: 300.ms),
             ),
           const SizedBox(width: 12),
           Expanded(
@@ -432,17 +529,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 Text(
                   connection.peerUsername ?? 'Собеседник',
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                  ),
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
                 ),
                 Text(
-                  connection.peerTalking ? 'Говорит...' : 'Онлайн',
+                  talking
+                      ? 'Говорит...'
+                      : (webrtc.callState.isMediaReady
+                          ? 'На связи'
+                          : webrtc.callState.label),
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: connection.peerTalking 
-                      ? const Color(0xFF00D4FF)
-                      : const Color(0xFF00FF88),
-                  ),
+                        color: talking
+                            ? const Color(0xFF00D4FF)
+                            : const Color(0xFF00FF88),
+                      ),
                 ),
               ],
             ),

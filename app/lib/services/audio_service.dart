@@ -1,70 +1,154 @@
 import 'package:flutter/foundation.dart';
 import 'package:audio_session/audio_session.dart';
+import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
-import '../config.dart';
 
+/// Android audio focus + native MODE_IN_COMMUNICATION / Bluetooth SCO.
 class AudioService extends ChangeNotifier {
+  static const _channel = MethodChannel('com.example.mototalk/audio');
+
   final AudioPlayer _audioPlayer = AudioPlayer();
   AudioSession? _audioSession;
-  
+
   bool _isRecording = false;
   bool _isPlaying = false;
   bool _isMuted = false;
   double _volume = 1.0;
   bool _isBluetoothConnected = false;
   bool _isMusicPaused = false;
-  String? _currentMusicSource;
+  bool _callActive = false;
 
-  // Геттеры
   bool get isRecording => _isRecording;
   bool get isPlaying => _isPlaying;
   bool get isMuted => _isMuted;
   double get volume => _volume;
   bool get isBluetoothConnected => _isBluetoothConnected;
   bool get isMusicPaused => _isMusicPaused;
+  bool get callActive => _callActive;
 
   AudioService() {
     _initAudio();
+  }
+
+  Future<void> _invoke(String method) async {
+    try {
+      await _channel.invokeMethod(method);
+    } catch (e) {
+      debugPrint('AudioService: native $method skipped: $e');
+    }
   }
 
   Future<void> _initAudio() async {
     try {
       _audioSession = await AudioSession.instance;
       await _audioSession!.configure(const AudioSessionConfiguration(
-        avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
-        avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.allowBluetooth,
-        avAudioSessionMode: AVAudioSessionMode.voiceChat,
         androidAudioAttributes: AndroidAudioAttributes(
           contentType: AndroidAudioContentType.speech,
           usage: AndroidAudioUsage.voiceCommunication,
+          flags: AndroidAudioFlags.audibilityEnforced,
         ),
         androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
         androidWillPauseWhenDucked: true,
       ));
-      
-      _isBluetoothConnected = true; // Предполагаем, что Bluetooth доступен
+
+      _audioSession!.interruptionEventStream.listen((event) {
+        debugPrint(
+          'AudioService: interruption begin=${event.begin} type=${event.type}',
+        );
+      });
+
+      _audioSession!.devicesChangedEventStream.listen((event) {
+        final hasBt = event.devicesAdded.any(
+          (d) =>
+              d.type == AudioDeviceType.bluetoothSco ||
+              d.type == AudioDeviceType.bluetoothA2dp,
+        );
+        if (hasBt) {
+          _isBluetoothConnected = true;
+          notifyListeners();
+          if (_callActive) {
+            unawaitedEnableSco();
+          }
+        }
+        final removedBt = event.devicesRemoved.any(
+          (d) =>
+              d.type == AudioDeviceType.bluetoothSco ||
+              d.type == AudioDeviceType.bluetoothA2dp,
+        );
+        if (removedBt) {
+          _isBluetoothConnected = false;
+          notifyListeners();
+        }
+      });
+
       notifyListeners();
-    } catch (e) {
-      print('Audio initialization error: $e');
+    } catch (e, st) {
+      debugPrint('AudioService: init error: $e\n$st');
+    }
+  }
+
+  void unawaitedEnableSco() {
+    enableBluetoothSco();
+  }
+
+  Future<void> prepareForCall() async {
+    try {
+      _callActive = true;
+      await _audioSession?.setActive(true);
+      await _invoke('setCommunicationMode');
+      await _invoke('enableBluetoothSco');
+      await _invoke('startForegroundService');
+      await _invoke('acquireWakeLock');
+      debugPrint('AudioService: call audio ready (MODE_IN_COMMUNICATION)');
+      notifyListeners();
+    } catch (e, st) {
+      debugPrint('AudioService: prepareForCall failed: $e\n$st');
+      rethrow;
+    }
+  }
+
+  Future<void> prepareForPlayback() async {
+    try {
+      await _audioSession?.setActive(true);
+      await _invoke('setCommunicationMode');
+      _isPlaying = true;
+      notifyListeners();
+    } catch (e, st) {
+      debugPrint('AudioService: prepareForPlayback failed: $e\n$st');
+    }
+  }
+
+  Future<void> endCall() async {
+    try {
+      _callActive = false;
+      _isPlaying = false;
+      _isRecording = false;
+      await _invoke('disableBluetoothSco');
+      await _invoke('resetAudioMode');
+      await _invoke('stopForegroundService');
+      await _invoke('releaseWakeLock');
+      await _audioSession?.setActive(false);
+      notifyListeners();
+    } catch (e, st) {
+      debugPrint('AudioService: endCall failed: $e\n$st');
     }
   }
 
   Future<bool> startRecording() async {
     try {
       await _audioSession?.setActive(true);
-      
-      // Pause music if playing
+      await _invoke('setCommunicationMode');
+
       if (_audioPlayer.playing) {
         _isMusicPaused = true;
         await _audioPlayer.pause();
       }
-      
+
       _isRecording = true;
       notifyListeners();
-      
       return true;
-    } catch (e) {
-      print('Start recording error: $e');
+    } catch (e, st) {
+      debugPrint('AudioService: startRecording error: $e\n$st');
       return false;
     }
   }
@@ -72,43 +156,40 @@ class AudioService extends ChangeNotifier {
   Future<bool> stopRecording() async {
     try {
       _isRecording = false;
-      
-      // Resume music if it was paused
+
       if (_isMusicPaused) {
         await _audioPlayer.play();
         _isMusicPaused = false;
       }
-      
-      await _audioSession?.setActive(false);
-      
+
+      // Keep communication mode / session while call is up (remote RX).
+      if (!_callActive) {
+        await _audioSession?.setActive(false);
+      }
+
       notifyListeners();
       return true;
-    } catch (e) {
-      print('Stop recording error: $e');
+    } catch (e, st) {
+      debugPrint('AudioService: stopRecording error: $e\n$st');
       return false;
     }
   }
 
   Future<bool> startPlaying() async {
-    try {
-      await _audioSession?.setActive(true);
-      _isPlaying = true;
-      notifyListeners();
-      return true;
-    } catch (e) {
-      print('Start playing error: $e');
-      return false;
-    }
+    await prepareForPlayback();
+    return true;
   }
 
   Future<bool> stopPlaying() async {
     try {
-      await _audioSession?.setActive(false);
       _isPlaying = false;
+      if (!_callActive) {
+        await _audioSession?.setActive(false);
+      }
       notifyListeners();
       return true;
-    } catch (e) {
-      print('Stop playing error: $e');
+    } catch (e, st) {
+      debugPrint('AudioService: stopPlaying error: $e\n$st');
       return false;
     }
   }
@@ -132,24 +213,16 @@ class AudioService extends ChangeNotifier {
   }
 
   Future<void> enableBluetoothSco() async {
-    try {
-      _isBluetoothConnected = true;
-      notifyListeners();
-    } catch (e) {
-      print('Enable Bluetooth SCO error: $e');
-    }
+    await _invoke('enableBluetoothSco');
+    _isBluetoothConnected = true;
+    notifyListeners();
   }
 
   Future<void> disableBluetoothSco() async {
-    try {
-      _isBluetoothConnected = false;
-      notifyListeners();
-    } catch (e) {
-      print('Disable Bluetooth SCO error: $e');
-    }
+    await _invoke('disableBluetoothSco');
+    notifyListeners();
   }
 
-  // Music integration methods
   Future<void> pauseMusic() async {
     if (_audioPlayer.playing) {
       _isMusicPaused = true;
@@ -169,17 +242,9 @@ class AudioService extends ChangeNotifier {
   Future<void> setMusicSource(String source) async {
     try {
       await _audioPlayer.setUrl(source);
-      _currentMusicSource = source;
-    } catch (e) {
-      print('Set music source error: $e');
+    } catch (e, st) {
+      debugPrint('AudioService: setMusicSource error: $e\n$st');
     }
-  }
-
-  // Audio processing configuration
-  Future<void> configureAudioProcessing() async {
-    // WebRTC handles most audio processing internally
-    // Noise suppression, echo cancellation, AGC are built into WebRTC
-    // Additional configuration can be added here if needed
   }
 
   @override
