@@ -35,6 +35,20 @@ class WebRTCService extends ChangeNotifier {
 
   WebRTCService(this._connectionService, this._audioService) {
     _wireSignaling();
+    _audioService.onExternalInterruptionBegin = _onExternalAudioInterruption;
+  }
+
+  /// Combined local TX + remote speaking — drives local-only music ducking.
+  bool get voiceActivity => _isTransmitting || _remoteSpeaking;
+
+  void _syncVoiceActivity() {
+    _audioService.onVoiceActivityChanged(voiceActivity);
+  }
+
+  void _onExternalAudioInterruption() {
+    if (!_isTransmitting) return;
+    _log('External audio interruption — stopping PTT TX');
+    unawaited(stopTransmitting());
   }
 
   void _wireSignaling() {
@@ -433,6 +447,7 @@ class WebRTCService extends ChangeNotifier {
       if (speaking != _remoteSpeaking) {
         _remoteSpeaking = speaking;
         _setCallState(speaking ? CallState.talking : CallState.connected);
+        _syncVoiceActivity();
         _log('Remote speaking=$speaking level=$level');
       }
     } catch (e) {
@@ -450,6 +465,7 @@ class WebRTCService extends ChangeNotifier {
       await _audioService.startRecording();
       _localAudioTrack!.enabled = true;
       _isTransmitting = true;
+      _syncVoiceActivity();
       notifyListeners();
       _connectionService.sendPttStart();
       _log('PTT TX on');
@@ -465,6 +481,7 @@ class WebRTCService extends ChangeNotifier {
         _localAudioTrack!.enabled = false;
       }
       _isTransmitting = false;
+      _syncVoiceActivity();
       await _audioService.stopRecording();
       _connectionService.sendPttEnd();
       notifyListeners();
@@ -509,6 +526,7 @@ class WebRTCService extends ChangeNotifier {
     _isInitiator = false;
     _isSettingUp = false;
 
+    // endCall → forceResumeNow() — music resumes immediately (not after 5s).
     await _audioService.endCall();
   }
 
@@ -523,6 +541,9 @@ class WebRTCService extends ChangeNotifier {
     _connectionService.onPeerJoined = null;
     _connectionService.onPeerLeft = null;
     _connectionService.removeListener(_onConnectionChanged);
+    if (_audioService.onExternalInterruptionBegin == _onExternalAudioInterruption) {
+      _audioService.onExternalInterruptionBegin = null;
+    }
     unawaited(_cleanup(reason: 'dispose'));
     super.dispose();
   }

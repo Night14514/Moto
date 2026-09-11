@@ -1,32 +1,44 @@
-import 'package:flutter/foundation.dart';
 import 'package:audio_session/audio_session.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:just_audio/just_audio.dart';
 
-/// Android audio focus + native MODE_IN_COMMUNICATION / Bluetooth SCO.
+import 'music_ducking_controller.dart';
+
+/// Call-session audio (MODE_IN_COMMUNICATION / SCO / FGS) plus local music ducking.
+///
+/// Music ducking is **local-only**: Android AudioFocus TRANSIENT_MAY_DUCK affects
+/// this device's external players (Spotify, Yandex, Telegram, …). Peers are never
+/// told about music state.
 class AudioService extends ChangeNotifier {
   static const _channel = MethodChannel('com.example.mototalk/audio');
 
-  final AudioPlayer _audioPlayer = AudioPlayer();
   AudioSession? _audioSession;
+  late final MusicDuckingController _ducking;
 
   bool _isRecording = false;
   bool _isPlaying = false;
   bool _isMuted = false;
   double _volume = 1.0;
   bool _isBluetoothConnected = false;
-  bool _isMusicPaused = false;
   bool _callActive = false;
+
+  /// Fired when a full audio interruption begins (e.g. GSM call).
+  /// WebRTCService should stop TX so we do not send over the phone call.
+  VoidCallback? onExternalInterruptionBegin;
 
   bool get isRecording => _isRecording;
   bool get isPlaying => _isPlaying;
   bool get isMuted => _isMuted;
   double get volume => _volume;
   bool get isBluetoothConnected => _isBluetoothConnected;
-  bool get isMusicPaused => _isMusicPaused;
   bool get callActive => _callActive;
+  bool get isMusicDucked => _ducking.duckActive;
 
   AudioService() {
+    _ducking = MusicDuckingController(
+      onDuckRequested: requestMusicDuck,
+      onResumeRequested: releaseMusicDuck,
+    );
     _initAudio();
   }
 
@@ -38,23 +50,37 @@ class AudioService extends ChangeNotifier {
     }
   }
 
+  Future<void> requestMusicDuck() => _invoke('requestDuckFocus');
+
+  Future<void> releaseMusicDuck() => _invoke('abandonDuckFocus');
+
   Future<void> _initAudio() async {
     try {
       _audioSession = await AudioSession.instance;
+      // Attributes for WebRTC voice path. Focus for external music is owned by
+      // MusicDuckingController → native TRANSIENT_MAY_DUCK (not permanent GAIN).
       await _audioSession!.configure(const AudioSessionConfiguration(
         androidAudioAttributes: AndroidAudioAttributes(
           contentType: AndroidAudioContentType.speech,
           usage: AndroidAudioUsage.voiceCommunication,
           flags: AndroidAudioFlags.audibilityEnforced,
         ),
-        androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
-        androidWillPauseWhenDucked: true,
+        androidAudioFocusGainType:
+            AndroidAudioFocusGainType.gainTransientMayDuck,
+        androidWillPauseWhenDucked: false,
       ));
 
       _audioSession!.interruptionEventStream.listen((event) {
         debugPrint(
           'AudioService: interruption begin=${event.begin} type=${event.type}',
         );
+        // GSM / higher-priority session: stop PTT TX. Pure duck interruptions
+        // from other apps do not require stopping our mic path.
+        if (event.begin &&
+            (event.type == AudioInterruptionType.pause ||
+                event.type == AudioInterruptionType.unknown)) {
+          onExternalInterruptionBegin?.call();
+        }
       });
 
       _audioSession!.devicesChangedEventStream.listen((event) {
@@ -79,6 +105,7 @@ class AudioService extends ChangeNotifier {
           _isBluetoothConnected = false;
           notifyListeners();
         }
+        // VAF ducking uses AudioFocus and does not depend on output device.
       });
 
       notifyListeners();
@@ -91,10 +118,22 @@ class AudioService extends ChangeNotifier {
     enableBluetoothSco();
   }
 
+  /// Voice activity on this device (local TX or remote partner speaking).
+  /// Triggers local music duck / 5s resume — never signals the peer.
+  void onVoiceActivityChanged(bool active) {
+    if (!_callActive && !active) {
+      // Outside a call, ensure we are not holding duck focus.
+      _ducking.forceResumeNow();
+      return;
+    }
+    _ducking.onVoiceActivityChanged(active);
+  }
+
   Future<void> prepareForCall() async {
     try {
       _callActive = true;
-      await _audioSession?.setActive(true);
+      // Do NOT request permanent AudioFocus here — that would pause Spotify
+      // for the entire call. Call session = mode/SCO/FGS/wake only.
       await _invoke('setCommunicationMode');
       await _invoke('enableBluetoothSco');
       await _invoke('startForegroundService');
@@ -109,7 +148,6 @@ class AudioService extends ChangeNotifier {
 
   Future<void> prepareForPlayback() async {
     try {
-      await _audioSession?.setActive(true);
       await _invoke('setCommunicationMode');
       _isPlaying = true;
       notifyListeners();
@@ -123,11 +161,13 @@ class AudioService extends ChangeNotifier {
       _callActive = false;
       _isPlaying = false;
       _isRecording = false;
+      // Immediate music resume — do not wait for the 5s grace period.
+      _ducking.forceResumeNow();
+      await releaseMusicDuck();
       await _invoke('disableBluetoothSco');
       await _invoke('resetAudioMode');
       await _invoke('stopForegroundService');
       await _invoke('releaseWakeLock');
-      await _audioSession?.setActive(false);
       notifyListeners();
     } catch (e, st) {
       debugPrint('AudioService: endCall failed: $e\n$st');
@@ -136,14 +176,7 @@ class AudioService extends ChangeNotifier {
 
   Future<bool> startRecording() async {
     try {
-      await _audioSession?.setActive(true);
       await _invoke('setCommunicationMode');
-
-      if (_audioPlayer.playing) {
-        _isMusicPaused = true;
-        await _audioPlayer.pause();
-      }
-
       _isRecording = true;
       notifyListeners();
       return true;
@@ -156,17 +189,6 @@ class AudioService extends ChangeNotifier {
   Future<bool> stopRecording() async {
     try {
       _isRecording = false;
-
-      if (_isMusicPaused) {
-        await _audioPlayer.play();
-        _isMusicPaused = false;
-      }
-
-      // Keep communication mode / session while call is up (remote RX).
-      if (!_callActive) {
-        await _audioSession?.setActive(false);
-      }
-
       notifyListeners();
       return true;
     } catch (e, st) {
@@ -175,40 +197,18 @@ class AudioService extends ChangeNotifier {
     }
   }
 
-  Future<bool> startPlaying() async {
-    await prepareForPlayback();
-    return true;
-  }
-
-  Future<bool> stopPlaying() async {
-    try {
-      _isPlaying = false;
-      if (!_callActive) {
-        await _audioSession?.setActive(false);
-      }
-      notifyListeners();
-      return true;
-    } catch (e, st) {
-      debugPrint('AudioService: stopPlaying error: $e\n$st');
-      return false;
-    }
-  }
-
   Future<void> setVolume(double volume) async {
     _volume = volume.clamp(0.0, 1.0);
-    await _audioPlayer.setVolume(_volume);
     notifyListeners();
   }
 
   Future<void> mute() async {
     _isMuted = true;
-    await _audioPlayer.setVolume(0.0);
     notifyListeners();
   }
 
   Future<void> unmute() async {
     _isMuted = false;
-    await _audioPlayer.setVolume(_volume);
     notifyListeners();
   }
 
@@ -223,33 +223,10 @@ class AudioService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> pauseMusic() async {
-    if (_audioPlayer.playing) {
-      _isMusicPaused = true;
-      await _audioPlayer.pause();
-      notifyListeners();
-    }
-  }
-
-  Future<void> resumeMusic() async {
-    if (_isMusicPaused) {
-      await _audioPlayer.play();
-      _isMusicPaused = false;
-      notifyListeners();
-    }
-  }
-
-  Future<void> setMusicSource(String source) async {
-    try {
-      await _audioPlayer.setUrl(source);
-    } catch (e, st) {
-      debugPrint('AudioService: setMusicSource error: $e\n$st');
-    }
-  }
-
   @override
   void dispose() {
-    _audioPlayer.dispose();
+    _ducking.dispose();
+    onExternalInterruptionBegin = null;
     super.dispose();
   }
 }
